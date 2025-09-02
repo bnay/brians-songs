@@ -597,7 +597,7 @@ function HomePage({ onPlaySong, onPlayAll, navigate, songs }: any) {
     <section className="max-w-6xl mx-auto px-4 py-10">
       <div className="rounded-3xl bg-gradient-to-br from-neutral-900 to-neutral-700 text-white p-8 md:p-12 shadow-xl">
         <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-          Grip. Rip. Repeat.
+          Welcome to briTunes!
         </h1>
         <p className="mt-2 text-neutral-200 max-w-2xl">
           Songs and stories from the road—bluesy grit, southern rock swagger,
