@@ -424,7 +424,7 @@ export default function App() {
             onClick={() => navigate("/")}
             aria-label="Go home"
           >
-            🎵 Brian's Songs
+            🎵 briTunes
           </button>
 
           <nav className="hidden md:flex gap-4 text-sm">
