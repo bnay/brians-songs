@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * React + Tailwind wireframe with working audio playback.
+ * React + Tailwind wireframe.
  * Safe multiline strings (use "\\n"); self-tests check for "\\n".
  * Sorting: Newest / Most Liked / A–Z.
- * Stories & lyrics render with <pre className="whitespace-pre-wrap leading-relaxed">.
  * Hash routing so URLs survive refresh (#/music, #/song/slug).
  * Persistence via localStorage + document.title per route.
+ * Player fix: stable queue so playback survives route/sort/search changes.
  */
 
 /* -------------------------
@@ -28,7 +28,7 @@ const SEED_SONGS = [
     lyrics:
       `Mama said be a good boy... (lyrics preview)\\n` +
       `Chorus: Be good, be kind, do right...`,
-    audioUrl: "",
+    audioUrl: "", // e.g. "/be-good-demo.mp3"
     likes: 24,
     visibility: "public",
   },
@@ -47,7 +47,7 @@ const SEED_SONGS = [
     lyrics:
       `But what of the man with years behind... (lyrics preview)\\n` +
       `Chorus: Diminished, erased, ignored...`,
-    audioUrl: "",
+    audioUrl: "", // e.g. "/diminished-demo.mp3"
     likes: 31,
     visibility: "public",
   },
@@ -100,11 +100,11 @@ const MOCK_POSTS = [
 /* -------------------------
  * useLocalStorage hook
  * ------------------------- */
-function useLocalStorage(key: string, initialValue: any) {
-  const [value, setValue] = useState(() => {
+function useLocalStorage<T = any>(key: string, initialValue: T) {
+  const [value, setValue] = useState<T>(() => {
     try {
       const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
+      return item ? (JSON.parse(item) as T) : initialValue;
     } catch {
       return initialValue;
     }
@@ -141,41 +141,65 @@ function runSelfTests(songs: any[]) {
       required.forEach((k) => {
         console.assert(k in s, `Song[${i}] missing key: ${k}`);
       });
-      console.assert(typeof s.title === "string" && s.title.length > 0, `Song[${i}] title invalid`);
-      console.assert(typeof s.slug === "string" && /^[a-z0-9-]+$/i.test(s.slug), `Song[${i}] slug invalid`);
-      console.assert(typeof s.lyrics === "string", `Song[${i}] lyrics must be a string`);
+      console.assert(
+        typeof s.title === "string" && s.title.length > 0,
+        `Song[${i}] title invalid`
+      );
+      console.assert(
+        typeof s.slug === "string" && /^[a-z0-9-]+$/i.test(s.slug),
+        `Song[${i}] slug invalid`
+      );
+      console.assert(
+        typeof s.lyrics === "string",
+        `Song[${i}] lyrics must be a string`
+      );
       console.assert(Array.isArray(s.moods), `Song[${i}] moods must be array`);
     });
 
     songs.forEach((s) => {
       const path = `/song/${s.slug}`;
-      console.assert(path.startsWith("/song/"), `Route path malformed for ${s.title}`);
+      console.assert(
+        path.startsWith("/song/"),
+        `Route path malformed for ${s.title}`
+      );
     });
 
     const q = songs[0]?.moods?.[0]?.toUpperCase?.() || "UPLIFTING";
     const found = songs.filter(
-      (s) => s.title.toLowerCase().includes(q.toLowerCase()) || s.moods.join(" ").toLowerCase().includes(q.toLowerCase())
+      (s) =>
+        s.title.toLowerCase().includes(q.toLowerCase()) ||
+        s.moods.join(" ").toLowerCase().includes(q.toLowerCase())
     );
-    console.assert(found.length >= 1, "Search by mood should find at least one song");
+    console.assert(
+      found.length >= 1,
+      "Search by mood should find at least one song"
+    );
 
     const hasNewline = songs.some((s) => s.lyrics.includes("\\n"));
-    console.assert(hasNewline, "At least one song should have multiline lyrics with a newline");
+    console.assert(
+      hasNewline,
+      "At least one song should have multiline lyrics with a newline"
+    );
 
     const pub = songs.some((s) => s.visibility === "public");
     const pri = songs.some((s) => s.visibility === "private");
-    console.assert(pub && pri, "Seed should include both public and private songs");
+    console.assert(
+      pub && pri,
+      "Seed should include both public and private songs"
+    );
 
-    songs.forEach((s, i) => {
-      console.assert(/^[-a-z0-9]+$/i.test(s.slug), `Song[${i}] slug should be alphanumeric/dash only`);
-    });
-
-    const byDateDesc = (a: any, b: any) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
+    const byDateDesc = (a: any, b: any) =>
+      new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
     const byLikesDesc = (a: any, b: any) => (b.likes || 0) - (a.likes || 0);
-    const byTitleAsc = (a: any, b: any) => (a.title || "").localeCompare(b.title || "");
+    const byTitleAsc = (a: any, b: any) =>
+      (a.title || "").localeCompare(b.title || "");
     [byDateDesc, byLikesDesc, byTitleAsc].forEach((cmp, idx) => {
       const copy = songs.slice();
       copy.sort(cmp);
-      console.assert(Array.isArray(copy) && copy.length === songs.length, `Sort test ${idx + 1} ok`);
+      console.assert(
+        Array.isArray(copy) && copy.length === songs.length,
+        `Sort test ${idx + 1} ok`
+      );
     });
   } catch (err) {
     console.error("Self-tests encountered an error:", err);
@@ -196,6 +220,7 @@ const routes = [
   { path: "/about", label: "About" },
   { path: "/subscribe", label: "Subscribe" },
   { path: "/private", label: "Private" },
+  { path: "/data", label: "Data" },
 ];
 
 function classNames(...xs: (string | false | null | undefined)[]) {
@@ -203,7 +228,8 @@ function classNames(...xs: (string | false | null | undefined)[]) {
 }
 
 function computeTitle(path: string, song?: { title: string } | null) {
-  if (path.startsWith("/song/") && song?.title) return `${song.title} – Brian's Songs`;
+  if (path.startsWith("/song/") && song?.title)
+    return `${song.title} – Brian's Songs`;
   switch (path) {
     case "/":
       return "Home – Brian's Songs";
@@ -223,6 +249,8 @@ function computeTitle(path: string, song?: { title: string } | null) {
       return "Subscribe – Brian's Songs";
     case "/private":
       return "Private – Brian's Songs";
+    case "/data":
+      return "Data – Brian's Songs";
     default:
       return "Brian's Songs";
   }
@@ -237,14 +265,27 @@ export default function App() {
 
   // Persisted state
   const [songs, setSongs] = useLocalStorage("msw:songs", SEED_SONGS);
-  const [liked, setLiked] = useLocalStorage("msw:liked", {});
-  const [guestbook, setGuestbook] = useLocalStorage("msw:guestbook", []);
-  const [comments, setComments] = useLocalStorage("msw:comments", {});
-  const [privateUnlocked, setPrivateUnlocked] = useLocalStorage("msw:priv", false);
+  const [liked, setLiked] = useLocalStorage(
+    "msw:liked",
+    {} as Record<number, boolean>
+  );
+  const [guestbook, setGuestbook] = useLocalStorage(
+    "msw:guestbook",
+    [] as any[]
+  );
+  const [comments, setComments] = useLocalStorage(
+    "msw:comments",
+    {} as Record<string, any[]>
+  );
+  const [privateUnlocked, setPrivateUnlocked] = useLocalStorage(
+    "msw:priv",
+    false
+  );
   const [sortMode, setSortMode] = useLocalStorage("msw:sort", "newest"); // 'newest' | 'liked' | 'az'
 
-  // Player state
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  // Player state (queue-based so playback survives navigation)
+  const [queue, setQueue] = useState<number[]>([]);
+  const [queueIndex, setQueueIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
   // Init: self-tests
@@ -289,9 +330,10 @@ export default function App() {
         )
       : base;
 
-    const byDateDesc = (a: any, b: any) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
+    const byDateDesc = (a: any, b: any) =>
+      new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime();
     const byLikesDesc = (a: any, b: any) =>
-      (b.likes + (liked[b.id] ? 1 : 0)) - (a.likes + (liked[a.id] ? 1 : 0));
+      b.likes + (liked[b.id] ? 1 : 0) - (a.likes + (liked[a.id] ? 1 : 0));
     const byTitleAsc = (a: any, b: any) => a.title.localeCompare(b.title);
 
     if (sortMode === "liked") base.sort(byLikesDesc);
@@ -314,21 +356,56 @@ export default function App() {
     document.title = title;
   }, [path, routeSong]);
 
-  // Player helpers
+  // Current song derived from queue
+  const currentSong = useMemo(() => {
+    if (queueIndex == null) return null;
+    const id = queue[queueIndex];
+    return songs.find((s: any) => s.id === id) || null;
+  }, [queue, queueIndex, songs]);
+
+  // Start playback for a given song, snapshotting the current visible list as the queue
   const playBySong = (song: any) => {
-    const idx = visibleSongs.findIndex((s: any) => s.id === song.id);
-    if (idx !== -1) {
-      setActiveIndex(idx);
-      setIsPlaying(true);
-      if (!path.startsWith("/song/")) navigate(`/song/${song.slug}`);
-    }
+    const newQueue = visibleSongs.map((s: any) => s.id);
+    const startIndex = newQueue.indexOf(song.id);
+    if (startIndex === -1) return;
+
+    setQueue(newQueue);
+    setQueueIndex(startIndex);
+    setIsPlaying(true);
+
+    if (!path.startsWith("/song/")) navigate(`/song/${song.slug}`);
+  };
+
+  // Start playback of the entire *visible* list (respects search/sort/private)
+  const playAllVisible = () => {
+    if (!visibleSongs.length) return;
+    const ids = visibleSongs.map((s: any) => s.id);
+    setQueue(ids);
+    setQueueIndex(0);
+    setIsPlaying(true);
+    // Optional: navigate to the first song's page
+    const first = songs.find((s: any) => s.id === ids[0]);
+    if (first && !path.startsWith("/song/")) navigate(`/song/${first.slug}`);
   };
 
   const openSongDetail = (song: any) => navigate(`/song/${song.slug}`);
 
   // Update a song (attach audio URL, etc.)
   const updateSong = (id: number, patch: any) => {
-    setSongs((prev: any[]) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setSongs((prev: any[]) =>
+      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+    );
+  };
+
+  // Queue stepping
+  const stepQueue = (dir: number) => {
+    if (!queue.length || queueIndex == null) return;
+    const next = (queueIndex + dir + queue.length) % queue.length;
+    setQueueIndex(next);
+  };
+
+  const stopPlayback = () => {
+    setIsPlaying(false);
   };
 
   const currentRoute = (() => {
@@ -379,7 +456,12 @@ export default function App() {
       {/* Main */}
       <main className="flex-1">
         {currentRoute === "home" && (
-          <HomePage onPlaySong={playBySong} navigate={navigate} songs={songs} />
+          <HomePage
+            onPlaySong={playBySong}
+            onPlayAll={playAllVisible}
+            navigate={navigate}
+            songs={songs}
+          />
         )}
 
         {currentRoute === "music" && (
@@ -387,6 +469,7 @@ export default function App() {
             songs={visibleSongs}
             onOpenSong={openSongDetail}
             onPlaySong={playBySong}
+            onPlayAll={playAllVisible}
             liked={liked}
             setLiked={setLiked}
             sortMode={sortMode}
@@ -408,7 +491,11 @@ export default function App() {
         )}
 
         {currentRoute === "playlists" && (
-          <PlaylistsPage songs={songs} onPlaySong={playBySong} navigate={navigate} />
+          <PlaylistsPage
+            songs={songs}
+            onPlaySong={playBySong}
+            navigate={navigate}
+          />
         )}
 
         {currentRoute === "stories" && <StoriesPage posts={MOCK_POSTS} />}
@@ -416,7 +503,10 @@ export default function App() {
         {currentRoute === "request" && <RequestPage />}
 
         {currentRoute === "guestbook" && (
-          <GuestbookPage entries={guestbook} onSubmit={(e: any) => setGuestbook([e, ...guestbook])} />
+          <GuestbookPage
+            entries={guestbook}
+            onSubmit={(e: any) => setGuestbook([e, ...guestbook])}
+          />
         )}
 
         {currentRoute === "about" && <AboutPage />}
@@ -433,22 +523,45 @@ export default function App() {
           />
         )}
 
-        {currentRoute === "notfound" && <NotFound onBack={() => navigate("/")} />}
+        {currentRoute === "data" && (
+          <DataPage
+            songs={songs}
+            liked={liked}
+            comments={comments}
+            guestbook={guestbook}
+            privateUnlocked={privateUnlocked}
+            sortMode={sortMode}
+            setSongs={setSongs}
+            setLiked={setLiked}
+            setComments={setComments}
+            setGuestbook={setGuestbook}
+            setPrivateUnlocked={setPrivateUnlocked}
+            setSortMode={setSortMode}
+          />
+        )}
+
+        {currentRoute === "notfound" && (
+          <NotFound onBack={() => navigate("/")} />
+        )}
       </main>
 
-      {/* Persistent Mini Player */}
+      {/* Persistent Mini Player (queue-based) */}
       <MiniPlayer
-        songs={visibleSongs}
-        activeIndex={activeIndex}
-        setActiveIndex={setActiveIndex}
+        currentSong={currentSong}
         isPlaying={isPlaying}
         setIsPlaying={setIsPlaying}
+        canStep={queue.length > 1 && queueIndex != null}
+        onStepPrev={() => stepQueue(-1)}
+        onStepNext={() => stepQueue(1)}
+        onStop={stopPlayback}
       />
 
       {/* Footer */}
       <footer className="border-t border-neutral-200 py-6 text-sm">
         <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-3">
-          <p className="text-neutral-600">© {new Date().getFullYear()} Brian Nay — All rights reserved.</p>
+          <p className="text-neutral-600">
+            © {new Date().getFullYear()} Brian Nay — All rights reserved.
+          </p>
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/subscribe")}
@@ -472,16 +585,23 @@ export default function App() {
 /* -------------------------
  * Components
  * ------------------------- */
-function HomePage({ onPlaySong, navigate, songs }: any) {
-  const latest =
-    [...songs].filter((s) => s.visibility === "public").sort((a, b) => new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime())[0];
+function HomePage({ onPlaySong, onPlayAll, navigate, songs }: any) {
+  const latest = [...songs]
+    .filter((s) => s.visibility === "public")
+    .sort(
+      (a, b) =>
+        new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime()
+    )[0];
 
   return (
     <section className="max-w-6xl mx-auto px-4 py-10">
       <div className="rounded-3xl bg-gradient-to-br from-neutral-900 to-neutral-700 text-white p-8 md:p-12 shadow-xl">
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">Grip. Rip. Repeat.</h1>
+        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
+          Grip. Rip. Repeat.
+        </h1>
         <p className="mt-2 text-neutral-200 max-w-2xl">
-          Songs and stories from the road—bluesy grit, southern rock swagger, and quiet moments in between.
+          Songs and stories from the road—bluesy grit, southern rock swagger,
+          and quiet moments in between.
         </p>
         {latest && (
           <div className="mt-6 flex flex-col md:flex-row items-start md:items-center gap-3">
@@ -497,13 +617,21 @@ function HomePage({ onPlaySong, navigate, songs }: any) {
             >
               Browse All Songs
             </button>
+            <button
+              className="px-5 py-3 rounded-2xl border border-white/40 hover:bg-white/10"
+              onClick={onPlayAll}
+            >
+              ▶ Play All
+            </button>
           </div>
         )}
       </div>
 
       {/* Featured playlist teaser */}
       <div className="mt-10">
-        <h2 className="text-xl font-semibold">Featured Playlist · New &amp; Noteworthy</h2>
+        <h2 className="text-xl font-semibold">
+          Featured Playlist · New &amp; Noteworthy
+        </h2>
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
           {songs
             .filter((s: any) => s.visibility === "public")
@@ -517,16 +645,31 @@ function HomePage({ onPlaySong, navigate, songs }: any) {
   );
 }
 
-function MusicPage({ songs, onOpenSong, onPlaySong, liked, setLiked, sortMode, setSortMode }: any) {
+function MusicPage({
+  songs,
+  onOpenSong,
+  onPlaySong,
+  onPlayAll,
+  liked,
+  setLiked,
+  sortMode,
+  setSortMode,
+}: any) {
   const sortLabel =
-    sortMode === "newest" ? "Sorted by Newest" : sortMode === "liked" ? "Sorted by Most Liked" : "Sorted A–Z";
+    sortMode === "newest"
+      ? "Sorted by Newest"
+      : sortMode === "liked"
+      ? "Sorted by Most Liked"
+      : "Sorted A–Z";
 
   return (
     <section className="max-w-6xl mx-auto px-4 py-10">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Song Library</h1>
-          <p className="text-neutral-600">Browse by mood, genre, or just press play.</p>
+          <p className="text-neutral-600">
+            Browse by mood, genre, or just press play.
+          </p>
           <p className="mt-2 text-xs text-neutral-500">
             {sortLabel} • {songs.length} song{songs.length === 1 ? "" : "s"}
           </p>
@@ -543,21 +686,36 @@ function MusicPage({ songs, onOpenSong, onPlaySong, liked, setLiked, sortMode, s
               aria-pressed={sortMode === b.key}
               className={classNames(
                 "px-3 py-2 rounded-xl border",
-                sortMode === b.key ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                sortMode === b.key
+                  ? "bg-neutral-900 text-white"
+                  : "hover:bg-neutral-100"
               )}
             >
               {b.label}
             </button>
           ))}
+          <button
+            className="ml-2 px-3 py-2 rounded-xl bg-neutral-900 text-white hover:opacity-90"
+            onClick={onPlayAll}
+            disabled={songs.length === 0}
+            title="Queue all visible songs (respects search/sort)"
+          >
+            ▶ Play All
+          </button>
         </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
         {songs.map((s: any) => (
-          <div key={s.id} className="group rounded-2xl border p-4 hover:shadow-lg transition-shadow bg-white">
+          <div
+            key={s.id}
+            className="group rounded-2xl border p-4 hover:shadow-lg transition-shadow bg-white"
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-semibold text-lg leading-tight">{s.title}</h3>
+                <h3 className="font-semibold text-lg leading-tight">
+                  {s.title}
+                </h3>
                 <p className="text-xs text-neutral-600">
                   {s.genre} • {s.duration}
                 </p>
@@ -568,15 +726,22 @@ function MusicPage({ songs, onOpenSong, onPlaySong, liked, setLiked, sortMode, s
                 }}
                 className={classNames(
                   "px-2 py-1 text-xs rounded-lg border",
-                  liked[s.id] ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                  liked[s.id]
+                    ? "bg-neutral-900 text-white"
+                    : "hover:bg-neutral-100"
                 )}
               >
                 {liked[s.id] ? "♥ Liked" : "♡ Like"}
               </button>
             </div>
-            <p className="mt-2 text-sm text-neutral-700 line-clamp-2">{s.story.replaceAll("\\n", " ")}</p>
+            <p className="mt-2 text-sm text-neutral-700 line-clamp-2">
+              {s.story.replaceAll("\\n", " ")}
+            </p>
             <div className="mt-4 flex items-center justify-between">
-              <button onClick={() => onOpenSong(s)} className="text-sm underline underline-offset-4">
+              <button
+                onClick={() => onOpenSong(s)}
+                className="text-sm underline underline-offset-4"
+              >
                 View lyrics
               </button>
               <button
@@ -630,10 +795,14 @@ function SongDetailPage({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setLiked((prev: any) => ({ ...prev, [song.id]: !prev[song.id] }))}
+            onClick={() =>
+              setLiked((prev: any) => ({ ...prev, [song.id]: !prev[song.id] }))
+            }
             className={classNames(
               "px-3 py-2 rounded-xl border text-sm",
-              liked[song.id] ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+              liked[song.id]
+                ? "bg-neutral-900 text-white"
+                : "hover:bg-neutral-100"
             )}
           >
             {liked[song.id] ? "♥ Liked" : "♡ Like"}
@@ -669,9 +838,15 @@ function SongDetailPage({
                 placeholder="Paste direct MP3/WAV URL (https://...)"
                 defaultValue={song.audioUrl}
                 className="px-3 py-2 rounded-xl border w-full"
-                onBlur={(e) => onUpdateSong(song.id, { audioUrl: e.target.value.trim() })}
+                onBlur={(e) =>
+                  onUpdateSong(song.id, {
+                    audioUrl: (e.target as HTMLInputElement).value.trim(),
+                  })
+                }
               />
-              <label className="text-xs text-neutral-600">or upload a file</label>
+              <label className="text-xs text-neutral-600">
+                or upload a file
+              </label>
               <input
                 type="file"
                 accept="audio/*"
@@ -687,7 +862,10 @@ function SongDetailPage({
             </div>
 
             <div className="mt-3 text-xs text-neutral-600">
-              <p>Tip: In CodeSandbox, a pasted HTTPS URL is simplest. Uploaded files play via a temporary local URL.</p>
+              <p>
+                Tip: In CodeSandbox, a pasted HTTPS URL is simplest. Uploaded
+                files play via a temporary local URL.
+              </p>
             </div>
           </div>
 
@@ -723,13 +901,17 @@ function SongDetailPage({
         />
         <div className="mt-4 space-y-3">
           {thread.length === 0 && (
-            <p className="text-sm text-neutral-600">No comments yet—be the first to share a thought.</p>
+            <p className="text-sm text-neutral-600">
+              No comments yet—be the first to share a thought.
+            </p>
           )}
           {thread.map((c: any, idx: number) => (
             <div key={idx} className="rounded-xl border p-3">
               <div className="text-sm">
                 <span className="font-medium">{c.name}</span>{" "}
-                <span className="text-neutral-500">· {new Date(c.createdAt).toLocaleString()}</span>
+                <span className="text-neutral-500">
+                  · {new Date(c.createdAt).toLocaleString()}
+                </span>
               </div>
               <p className="text-sm mt-1">{c.message}</p>
             </div>
@@ -757,13 +939,18 @@ function PlaylistsPage({ songs, onPlaySong, navigate }: any) {
             <ul className="mt-2 text-sm list-disc list-inside text-neutral-700">
               {songs
                 .filter((s: any) =>
-                  b.mood === "southern" ? s.genre.toLowerCase().includes("southern") : s.moods.includes(b.mood)
+                  b.mood === "southern"
+                    ? s.genre.toLowerCase().includes("southern")
+                    : s.moods.includes(b.mood)
                 )
                 .filter((s: any) => s.visibility === "public")
                 .slice(0, 5)
                 .map((s: any) => (
                   <li key={s.id} className="flex items-center justify-between">
-                    <button className="underline underline-offset-4" onClick={() => navigate(`/song/${s.slug}`)}>
+                    <button
+                      className="underline underline-offset-4"
+                      onClick={() => navigate(`/song/${s.slug}`)}
+                    >
                       {s.title}
                     </button>
                     <button
@@ -804,22 +991,58 @@ function StoriesPage({ posts }: any) {
 }
 
 function RequestPage() {
-  const [form, setForm] = useState({ name: "", idea: "", vibe: "", dedication: "" });
-  const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const [form, setForm] = useState({
+    name: "",
+    idea: "",
+    vibe: "",
+    dedication: "",
+  });
+  const onChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => setForm({ ...form, [e.target.name]: e.target.value });
   return (
     <section className="max-w-2xl mx-auto px-4 py-10">
       <h1 className="text-2xl font-semibold">Request a Song</h1>
-      <p className="text-neutral-600">Have a theme, dedication, or mood in mind? Tell me below.</p>
+      <p className="text-neutral-600">
+        Have a theme, dedication, or mood in mind? Tell me below.
+      </p>
       <div className="mt-6 grid gap-4">
-        <input name="name" value={form.name} onChange={onChange} placeholder="Your name" className="px-3 py-2 rounded-xl border" />
-        <textarea name="idea" value={form.idea} onChange={onChange} placeholder="Idea / story / occasion" className="px-3 py-2 rounded-xl border min-h-[100px]" />
-        <input name="vibe" value={form.vibe} onChange={onChange} placeholder="Tempo / vibe (e.g., bluesy, 90 bpm)" className="px-3 py-2 rounded-xl border" />
-        <input name="dedication" value={form.dedication} onChange={onChange} placeholder="Dedication (optional)" className="px-3 py-2 rounded-xl border" />
+        <input
+          name="name"
+          value={form.name}
+          onChange={onChange}
+          placeholder="Your name"
+          className="px-3 py-2 rounded-xl border"
+        />
+        <textarea
+          name="idea"
+          value={form.idea}
+          onChange={onChange}
+          placeholder="Idea / story / occasion"
+          className="px-3 py-2 rounded-xl border min-h-[100px]"
+        />
+        <input
+          name="vibe"
+          value={form.vibe}
+          onChange={onChange}
+          placeholder="Tempo / vibe (e.g., bluesy, 90 bpm)"
+          className="px-3 py-2 rounded-xl border"
+        />
+        <input
+          name="dedication"
+          value={form.dedication}
+          onChange={onChange}
+          placeholder="Dedication (optional)"
+          className="px-3 py-2 rounded-xl border"
+        />
         <button
           className="px-4 py-2 rounded-xl bg-neutral-900 text-white hover:opacity-90"
           onClick={() => {
-            alert(`Thanks ${form.name || "friend"}! Request received: ${form.idea.slice(0, 60)}...`);
+            alert(
+              `Thanks ${
+                form.name || "friend"
+              }! Request received: ${form.idea.slice(0, 60)}...`
+            );
             setForm({ name: "", idea: "", vibe: "", dedication: "" });
           }}
         >
@@ -861,12 +1084,16 @@ function GuestbookPage({ entries, onSubmit }: any) {
         </button>
       </div>
       <div className="mt-6 space-y-3">
-        {entries.length === 0 && <p className="text-sm text-neutral-600">No messages yet—say hello!</p>}
+        {entries.length === 0 && (
+          <p className="text-sm text-neutral-600">No messages yet—say hello!</p>
+        )}
         {entries.map((e: any, idx: number) => (
           <div key={idx} className="rounded-xl border p-3 bg-white">
             <div className="text-sm">
               <span className="font-medium">{e.name || "Anonymous"}</span>{" "}
-              <span className="text-neutral-500">· {new Date(e.createdAt).toLocaleString()}</span>
+              <span className="text-neutral-500">
+                · {new Date(e.createdAt).toLocaleString()}
+              </span>
             </div>
             <p className="text-sm mt-1">{e.message}</p>
           </div>
@@ -888,7 +1115,8 @@ This site is a home for works-in-progress and finished tracks I share with famil
       <div className="mt-6 rounded-2xl border p-4 bg-white">
         <h2 className="font-semibold">Influences</h2>
         <p className="text-sm mt-2">
-          Lynyrd Skynyrd, Chris Stapleton, The Black Keys, John Mayer (trio era), and a steady diet of old-school blues.
+          Lynyrd Skynyrd, Chris Stapleton, The Black Keys, John Mayer (trio
+          era), and a steady diet of old-school blues.
         </p>
       </div>
     </section>
@@ -900,7 +1128,9 @@ function SubscribePage() {
   return (
     <section className="max-w-sm mx-auto px-4 py-16 text-center">
       <h1 className="text-2xl font-semibold">Subscribe for Updates</h1>
-      <p className="mt-2 text-neutral-600">Get an email when a new song drops.</p>
+      <p className="mt-2 text-neutral-600">
+        Get an email when a new song drops.
+      </p>
       <div className="mt-6 grid gap-3">
         <input
           value={email}
@@ -922,14 +1152,22 @@ function SubscribePage() {
   );
 }
 
-function PrivatePage({ unlocked, setUnlocked, songs, onOpenSong, onPlaySong }: any) {
+function PrivatePage({
+  unlocked,
+  setUnlocked,
+  songs,
+  onOpenSong,
+  onPlaySong,
+}: any) {
   const [pw, setPw] = useState("");
   return (
     <section className="max-w-3xl mx-auto px-4 py-10">
       <h1 className="text-2xl font-semibold">Private Area</h1>
       {!unlocked ? (
         <div className="mt-4 rounded-2xl border p-4 bg-white">
-          <p className="text-sm text-neutral-700">Enter the family password to access early releases and drafts.</p>
+          <p className="text-sm text-neutral-700">
+            Enter the family password to access early releases and drafts.
+          </p>
           <div className="mt-3 flex gap-2">
             <input
               value={pw}
@@ -945,7 +1183,9 @@ function PrivatePage({ unlocked, setUnlocked, songs, onOpenSong, onPlaySong }: a
               Unlock
             </button>
           </div>
-          <p className="text-xs text-neutral-500 mt-2">(Prototype: any non-empty password unlocks.)</p>
+          <p className="text-xs text-neutral-500 mt-2">
+            (Prototype: any non-empty password unlocks.)
+          </p>
         </div>
       ) : (
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -955,9 +1195,14 @@ function PrivatePage({ unlocked, setUnlocked, songs, onOpenSong, onPlaySong }: a
               <p className="text-xs text-neutral-600">
                 {s.genre} • {s.duration}
               </p>
-              <p className="mt-2 text-sm text-neutral-700 line-clamp-2">{s.story.replaceAll("\\n", " ")}</p>
+              <p className="mt-2 text-sm text-neutral-700 line-clamp-2">
+                {s.story.replaceAll("\\n", " ")}
+              </p>
               <div className="mt-4 flex items-center justify-between">
-                <button onClick={() => onOpenSong(s)} className="text-sm underline underline-offset-4">
+                <button
+                  onClick={() => onOpenSong(s)}
+                  className="text-sm underline underline-offset-4"
+                >
                   View lyrics
                 </button>
                 <button
@@ -971,6 +1216,160 @@ function PrivatePage({ unlocked, setUnlocked, songs, onOpenSong, onPlaySong }: a
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function DataPage({
+  songs,
+  liked,
+  comments,
+  guestbook,
+  privateUnlocked,
+  sortMode,
+  setSongs,
+  setLiked,
+  setComments,
+  setGuestbook,
+  setPrivateUnlocked,
+  setSortMode,
+}: any) {
+  const [status, setStatus] = useState("");
+
+  const dataObject = useMemo(
+    () => ({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      songs,
+      liked,
+      comments,
+      guestbook,
+      privateUnlocked,
+      sortMode,
+    }),
+    [songs, liked, comments, guestbook, privateUnlocked, sortMode]
+  );
+
+  const doExport = () => {
+    try {
+      const blob = new Blob([JSON.stringify(dataObject, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `brian-songs-backup-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus("Exported current data to a JSON file.");
+    } catch {
+      setStatus("Export failed.");
+    }
+  };
+
+  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      if (!parsed || typeof parsed !== "object") throw new Error("Bad JSON");
+      if (Array.isArray(parsed.songs)) setSongs(parsed.songs);
+      if (parsed.liked && typeof parsed.liked === "object")
+        setLiked(parsed.liked);
+      if (parsed.comments && typeof parsed.comments === "object")
+        setComments(parsed.comments);
+      if (Array.isArray(parsed.guestbook)) setGuestbook(parsed.guestbook);
+      if (typeof parsed.privateUnlocked === "boolean")
+        setPrivateUnlocked(parsed.privateUnlocked);
+      if (typeof parsed.sortMode === "string") setSortMode(parsed.sortMode);
+
+      setStatus("Import complete.");
+      e.target.value = "";
+    } catch {
+      setStatus("Import failed: invalid JSON.");
+    }
+  };
+
+  const clearAll = () => {
+    if (
+      !confirm(
+        "This will clear all local data (likes, comments, guestbook, songs). Continue?"
+      )
+    )
+      return;
+    try {
+      const keys = [
+        "msw:songs",
+        "msw:liked",
+        "msw:guestbook",
+        "msw:comments",
+        "msw:priv",
+        "msw:sort",
+      ];
+      keys.forEach((k) => localStorage.removeItem(k));
+      setSongs(SEED_SONGS);
+      setLiked({});
+      setComments({});
+      setGuestbook([]);
+      setPrivateUnlocked(false);
+      setSortMode("newest");
+      setStatus("Local data cleared.");
+    } catch {
+      setStatus("Failed to clear local data.");
+    }
+  };
+
+  return (
+    <section className="max-w-3xl mx-auto px-4 py-10">
+      <h1 className="text-2xl font-semibold">Data (Export / Import)</h1>
+      <p className="text-neutral-600">
+        Back up or restore your site data without a server.
+      </p>
+
+      <div className="mt-6 grid gap-4">
+        <div className="rounded-2xl border p-4 bg-white">
+          <h2 className="font-semibold">Export</h2>
+          <p className="text-sm text-neutral-600">
+            Download your current data as JSON.
+          </p>
+          <button
+            className="mt-3 px-4 py-2 rounded-xl bg-neutral-900 text-white hover:opacity-90"
+            onClick={doExport}
+          >
+            Download Backup
+          </button>
+        </div>
+
+        <div className="rounded-2xl border p-4 bg-white">
+          <h2 className="font-semibold">Import</h2>
+          <p className="text-sm text-neutral-600">
+            Upload a previously exported JSON file to restore data.
+          </p>
+          <input
+            className="mt-3"
+            type="file"
+            accept="application/json"
+            onChange={onImportFile}
+          />
+        </div>
+
+        <div className="rounded-2xl border p-4 bg-white">
+          <h2 className="font-semibold">Danger Zone</h2>
+          <p className="text-sm text-neutral-600">
+            Clear all local data and reset to defaults.
+          </p>
+          <button
+            className="mt-3 px-4 py-2 rounded-xl border hover:bg-neutral-100"
+            onClick={clearAll}
+          >
+            Clear Local Data
+          </button>
+        </div>
+
+        {status && <p className="text-sm text-neutral-700">{status}</p>}
+      </div>
     </section>
   );
 }
@@ -1029,43 +1428,78 @@ function SongCard({ song, onPlay }: any) {
             {song.genre} • {song.duration}
           </p>
         </div>
-        <button className="text-xs px-2 py-1 rounded-lg border hover:bg-neutral-100" onClick={onPlay}>
+        <button
+          className="text-xs px-2 py-1 rounded-lg border hover:bg-neutral-100"
+          onClick={onPlay}
+        >
           ▶ Play
         </button>
       </div>
-      <p className="mt-2 text-sm text-neutral-700 line-clamp-2">{song.story.replaceAll("\\n", " ")}</p>
+      <p className="mt-2 text-sm text-neutral-700 line-clamp-2">
+        {song.story.replaceAll("\\n", " ")}
+      </p>
     </div>
   );
 }
 
-function MiniPlayer({ songs, activeIndex, setActiveIndex, isPlaying, setIsPlaying }: any) {
+/* -------------------------
+ * MiniPlayer (queue-based)
+ * ------------------------- */
+function MiniPlayer({
+  currentSong,
+  isPlaying,
+  setIsPlaying,
+  canStep,
+  onStepPrev,
+  onStepNext,
+  onStop,
+}: {
+  currentSong: any;
+  isPlaying: boolean;
+  setIsPlaying: (v: boolean) => void;
+  canStep: boolean;
+  onStepPrev: () => void;
+  onStepNext: () => void;
+  onStop: () => void;
+}) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const prevIdRef = useRef<number | null>(null);
+  const prevUrlRef = useRef<string | null>(null);
 
-  // Load/auto-play when activeIndex changes
+  // Only (re)load when the actual track changed (id or url)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (activeIndex == null || !songs[activeIndex]) return;
 
-    const url = songs[activeIndex].audioUrl || "";
-    audio.src = url;
-    if (url) {
-      audio
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch(() => setIsPlaying(false));
-    } else {
-      setIsPlaying(false);
+    const id = currentSong?.id ?? null;
+    const url = currentSong?.audioUrl ?? "";
+
+    const trackChanged = id !== prevIdRef.current || url !== prevUrlRef.current;
+
+    if (trackChanged) {
+      prevIdRef.current = id;
+      prevUrlRef.current = url;
+
+      audio.src = url || "";
+      if (url) {
+        audio
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch(() => setIsPlaying(false));
+      } else {
+        setIsPlaying(false);
+      }
     }
-  }, [activeIndex, songs, setIsPlaying]);
-
-  const hasTrack = activeIndex != null && songs[activeIndex];
+  }, [currentSong?.id, currentSong?.audioUrl, setIsPlaying]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (!hasTrack || !songs[activeIndex].audioUrl) {
-      alert("No audio attached for this song yet. Open the song and add an MP3/WAV URL or upload a file.");
+
+    if (!currentSong?.audioUrl) {
+      alert(
+        "No audio attached for this song yet. Open the song and add an MP3/WAV URL or upload a file."
+      );
       return;
     }
     if (audio.paused) {
@@ -1077,23 +1511,14 @@ function MiniPlayer({ songs, activeIndex, setActiveIndex, isPlaying, setIsPlayin
     }
   };
 
-  const step = (dir: number) => {
-    if (!songs.length) return;
-    if (activeIndex == null) return;
-    const next = (activeIndex + dir + songs.length) % songs.length;
-    setActiveIndex(next);
-  };
-
   const stop = () => {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
       audio.currentTime = 0;
     }
-    setIsPlaying(false);
+    onStop();
   };
-
-  const song = hasTrack ? songs[activeIndex] : null;
 
   return (
     <div className="sticky bottom-0 z-40">
@@ -1103,43 +1528,54 @@ function MiniPlayer({ songs, activeIndex, setActiveIndex, isPlaying, setIsPlayin
             <div className="flex items-center gap-3 min-w-0">
               <div className="h-10 w-10 rounded-xl bg-neutral-200" />
               <div className="min-w-0">
-                <div className="text-sm font-medium truncate">{song ? song.title : "Nothing playing"}</div>
+                <div className="text-sm font-medium truncate">
+                  {currentSong ? currentSong.title : "Nothing playing"}
+                </div>
                 <div className="text-xs text-neutral-500 truncate">
-                  {song ? `${song.genre} • ${song.duration}` : "Select a song and attach audio"}
+                  {currentSong
+                    ? `${currentSong.genre} • ${currentSong.duration}`
+                    : "Select a song and attach audio"}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 className="px-3 py-2 rounded-xl border text-sm hover:bg-neutral-100"
-                onClick={() => step(-1)}
-                disabled={activeIndex == null}
+                onClick={onStepPrev}
+                disabled={!canStep}
               >
                 ⏮
               </button>
               <button
                 className="px-3 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90"
                 onClick={togglePlay}
-                disabled={activeIndex == null}
+                disabled={!currentSong}
               >
                 {isPlaying ? "⏸" : "⏯"}
               </button>
               <button
                 className="px-3 py-2 rounded-xl border text-sm hover:bg-neutral-100"
-                onClick={() => step(1)}
-                disabled={activeIndex == null}
+                onClick={onStepNext}
+                disabled={!canStep}
               >
                 ⏭
               </button>
-              {song && (
-                <button className="px-3 py-2 rounded-xl border text-sm hover:bg-neutral-100" onClick={stop}>
+              {currentSong && (
+                <button
+                  className="px-3 py-2 rounded-xl border text-sm hover:bg-neutral-100"
+                  onClick={stop}
+                >
                   Stop
                 </button>
               )}
             </div>
           </div>
           {/* Hidden audio element controls actual playback */}
-          <audio ref={audioRef} className="w-full hidden" onEnded={() => step(1)} />
+          <audio
+            ref={audioRef}
+            className="w-full hidden"
+            onEnded={onStepNext}
+          />
         </div>
       </div>
     </div>
@@ -1150,8 +1586,13 @@ function NotFound({ onBack }: any) {
   return (
     <section className="max-w-3xl mx-auto px-4 py-16 text-center">
       <h1 className="text-3xl font-semibold">404</h1>
-      <p className="mt-2 text-neutral-600">That page wandered off. Let&apos;s get you back to the music.</p>
-      <button onClick={onBack} className="mt-6 px-4 py-2 rounded-xl border hover:bg-neutral-100">
+      <p className="mt-2 text-neutral-600">
+        That page wandered off. Let&apos;s get you back to the music.
+      </p>
+      <button
+        onClick={onBack}
+        className="mt-6 px-4 py-2 rounded-xl border hover:bg-neutral-100"
+      >
         Back to Home
       </button>
     </section>
